@@ -49,3 +49,6 @@
 [submodule "vendor/mapbox-gl-native-curl"]
 	path = vendor/mapbox-gl-native-curl
 	url = https://github.com/mapbox/mapbox-gl-native-curl.git
+[submodule "tinygltf"]
+	path = vendor/tinygltf
+	url = https://github.com/syoyo/tinygltf.git

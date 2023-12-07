@@ -1048,6 +1048,10 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 add_subdirectory(${PROJECT_SOURCE_DIR}/benchmark)
 add_subdirectory(${PROJECT_SOURCE_DIR}/render-test)
 
+set(TINYGLTF_HEADER_ONLY ON CACHE INTERNAL "" FORCE)
+set(TINYGLTF_INSTALL OFF CACHE INTERNAL "" FORCE)
+add_subdirectory(${PROJECT_SOURCE_DIR}/vendor/tinygltf)
+
 if(EXISTS ${PROJECT_SOURCE_DIR}/internal/internal.cmake)
     include(${PROJECT_SOURCE_DIR}/internal/internal.cmake)
 endif()
