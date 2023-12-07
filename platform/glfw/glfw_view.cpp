@@ -30,6 +30,11 @@
 #include <mapbox/geometry.hpp>
 #include <mapbox/geojson.hpp>
 
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <../vendor/tinygltf/tiny_gltf.h>
+
 #if MBGL_USE_GLES2
 #define GLFW_INCLUDE_ES2
 #endif // MBGL_USE_GLES2
@@ -45,6 +50,329 @@
 
 #if defined(MBGL_RENDER_BACKEND_OPENGL) && !defined(MBGL_LAYER_LOCATION_INDICATOR_DISABLE_ALL)
 #include <mbgl/style/layers/location_indicator_layer.hpp>
+#include "mbgl/gl/custom_layer.hpp"
+#include "mbgl/platform/gl_functions.hpp"
+#include "mbgl/util/color.hpp"
+#include "mbgl/style/expression/type.hpp"
+#include "mbgl/gl/custom_layer.hpp"
+#include <mbgl/style/layers/fill_layer.hpp>
+#include "mbgl/map/camera.hpp"
+#include "mbgl/style/layers/background_layer.hpp"
+#include <mbgl/util/mat4.hpp>
+#include <mbgl/gl/uniform.hpp>
+#include "mbgl/util/projection.hpp"
+#include "mbgl/map/transform_state.hpp"
+#include "mbgl/util/mat2.hpp"
+
+// Note that custom layers need to draw geometry with a z value of 1 to take advantage of
+// depth-based fragment culling.
+static const GLchar* vertexShaderSource = R"MBGL_SHADER(
+attribute vec3 a_pos;
+uniform mat4 proj_mat;
+void main() {
+    gl_Position = proj_mat * vec4(a_pos, 1.0);
+}
+)MBGL_SHADER";
+
+static const GLchar* fragmentShaderSource = R"MBGL_SHADER(
+void main() {
+    gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+}
+)MBGL_SHADER";
+
+class MeshLayer : public mbgl::style::CustomLayerHost {
+public:
+    void initialize() override {
+        program = MBGL_CHECK_ERROR(glCreateProgram());
+        vertexShader = MBGL_CHECK_ERROR(glCreateShader(GL_VERTEX_SHADER));
+        fragmentShader = MBGL_CHECK_ERROR(glCreateShader(GL_FRAGMENT_SHADER));
+
+        MBGL_CHECK_ERROR(glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr));
+        MBGL_CHECK_ERROR(glCompileShader(vertexShader));
+        MBGL_CHECK_ERROR(glAttachShader(program, vertexShader));
+        MBGL_CHECK_ERROR(glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr));
+        MBGL_CHECK_ERROR(glCompileShader(fragmentShader));
+        MBGL_CHECK_ERROR(glAttachShader(program, fragmentShader));
+        MBGL_CHECK_ERROR(glLinkProgram(program));
+        a_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_pos"));
+
+// std::vector<GLfloat> inVertices = {
+
+//             };
+            
+        std::vector<GLfloat> inVertices = { 
+         // top (+z)
+        -1, -1,  1,
+         1, -1,  1,
+        -1,  1,  1,
+        -1,  1,  1,
+         1, -1,  1,
+         1,  1,  1, 
+
+        // bottom (-z)
+        -1, -1, -1,
+        -1,  1, -1,
+         1, -1, -1,
+         1, -1, -1,
+        -1,  1, -1,
+         1,  1, -1,
+
+        // right (+x)
+         1, -1, -1, 
+         1,  1, -1, 
+         1, -1,  1, 
+         1, -1,  1, 
+         1,  1, -1, 
+         1,  1,  1, 
+
+        // left (-x)
+        -1, -1, -1, 
+        -1, -1,  1, 
+        -1,  1, -1, 
+        -1,  1, -1, 
+        -1, -1,  1, 
+        -1,  1,  1, 
+
+        // front (+y)
+        -1, -1, -1,
+         1, -1, -1,
+        -1, -1,  1,
+        -1, -1,  1,
+         1, -1, -1,
+         1, -1,  1,
+
+        // back (-y)
+        -1,  1, -1,
+        -1,  1,  1,
+         1,  1, -1,
+         1,  1, -1,
+        -1,  1,  1,
+         1,  1,  1,
+            };
+        // indices = { 
+        //     1,0,0, 2,1,0, 3,2,0,
+        //     7,0,1, 6,3,1, 5,4,1,
+        //     4,5,2, 5,6,2, 1,7,2,
+        //     5,7,3, 6,4,3, 2,3,3,
+        //     2,8,4, 6,9,4, 7,10,4,
+        //     0,11,5, 3,12,5, 7,10,5,
+        //     0,3,0, 1,0,0, 3,2,0,
+        //     4,13,1, 7,0,1, 5,4,1,
+        //     0,11,2, 4,5,2, 1,7,2,
+        //     1,11,3, 5,7,3, 2,3,3,
+        //     3,12,4, 2,8,4, 7,10,4,
+        //     4,5,5, 0,11,5, 7,10,5,
+        //     };
+
+
+        std::string err;
+        std::string warn;
+        tinygltf::TinyGLTF loader;
+
+        bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, "/home/serg/projects/mapbox-gl-native/platform/glfw/assets/Box.glb");
+        
+        const tinygltf::BufferView &bufferView = model.bufferViews[0];
+        const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
+        bool indexed = false;
+        if (model.meshes[0].primitives[0].indices >= 0) {
+            indexed = true;
+            const tinygltf::Accessor &indexAccessor = model.accessors[model.meshes[0].primitives[0].indices];
+            const tinygltf::BufferView& indexBufferView = model.bufferViews[indexAccessor.bufferView];
+            const tinygltf::Buffer& indexBuffer = model.buffers[indexBufferView.buffer];
+
+            MBGL_CHECK_ERROR(glGenBuffers(1, &indexBufferHandle));
+            MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
+            MBGL_CHECK_ERROR(glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBufferView.byteLength, &indexBuffer.data.at(0) + indexBufferView.byteOffset, GL_STATIC_DRAW));
+        }
+
+        auto positionAccessorIt = model.meshes[0].primitives[0].attributes.find("POSITION");
+        if (positionAccessorIt != model.meshes[0].primitives[0].attributes.end()) {
+            const int positionAccessorIndex = positionAccessorIt->second;
+            const tinygltf::Accessor& accessor = model.accessors[positionAccessorIndex];
+
+            // Get the buffer view and buffer
+            const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
+            const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+
+            // Access the position data
+            const float* positionsData = reinterpret_cast<const float*>(&buffer.data[bufferView.byteOffset + accessor.byteOffset]);
+
+            // Get the number of vertices (number of elements in the accessor)
+            numVertices = static_cast<int>(accessor.count);
+            uint32_t indicesSize = 0;
+            std::map<std::array<float, 3>, GLushort> uniqueVertices;
+            for (int i = 0; i < numVertices; ++i) {
+                std::array<float,3> vertex {
+                    positionsData[i * 3], positionsData[i * 3 + 1], positionsData[i * 3 + 2]
+                };
+
+                if (uniqueVertices.find(vertex) == uniqueVertices.end()) {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(indicesSize);
+                    indexed_vertices.push_back(vertex[0]);
+                    indexed_vertices.push_back(vertex[1]);
+                    indexed_vertices.push_back(vertex[2]);
+                    indicesSize ++;
+                }
+                all_vertices.push_back(vertex[0]);
+                all_vertices.push_back(vertex[1]);
+                all_vertices.push_back(vertex[2]);
+                
+                if (indexed) {
+                    indices.push_back(uniqueVertices[vertex]);
+                }
+            }
+            MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
+            MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
+            MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, all_vertices.size() * sizeof(GLfloat), &all_vertices[0], GL_STATIC_DRAW));
+
+//for indexed
+            // MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
+            // MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
+            // MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), &vertices[0], GL_STATIC_DRAW));
+
+            // MBGL_CHECK_ERROR(glGenBuffers(1, &indexBufferHandle));
+            // MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
+            // MBGL_CHECK_ERROR(glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLushort), &indices[0], GL_STATIC_DRAW));
+
+        }
+
+
+                // MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
+                // MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
+                // MBGL_CHECK_ERROR(glBufferData(bufferView.target, numVertices * 3 * sizeof(float),
+                //         &buffer.data.at(0) + bufferView.byteOffset, GL_STATIC_DRAW));
+
+        // MBGL_CHECK_ERROR(glGenBuffers(1, &indexBufferHandle));
+        // MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
+        // MBGL_CHECK_ERROR(glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBufferView.byteLength,
+        //                       &indexBuffer.data.at(0) + indexBufferView.byteOffset,
+        //                       GL_STATIC_DRAW));
+
+//triangle
+        // std::vector<GLfloat> vertices = { 
+        //     0.000000,0.000000,0.000000,
+        //     0.000000,1.000000,0.000000,
+        //     1.000000,0.000000,0.000000,
+        //     };
+            
+        // indices = { 
+        //     0,1,2
+        //     };
+
+        proj_mat_loc = glGetUniformLocation(program, "proj_mat");
+    }
+
+    void render(const mbgl::style::CustomLayerRenderParameters& param) override {
+        // Activate the shader program
+        MBGL_CHECK_ERROR(glUseProgram(program));
+        
+        // Enable and set up vertex attributes
+        // Assuming a_pos_loc is the attribute location for positions
+        MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_pos_loc));
+        MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
+        MBGL_CHECK_ERROR(glVertexAttribPointer(a_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
+
+        if (indices.empty()) {
+            MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, numVertices));
+        } else {
+            MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
+                glDrawElements(
+                    GL_TRIANGLE_STRIP,
+                    indices.size(),
+                    GL_UNSIGNED_SHORT,
+                    (void*)0
+                );
+        }
+
+        //indexed draw
+
+
+        MBGL_CHECK_ERROR(glDisableVertexAttribArray(a_pos_loc));
+
+        // // Bind the index buffer
+        // const tinygltf::Accessor& indexAccessor = model.accessors[model.meshes[0].primitives[0].indices];
+
+        // // Draw the elements
+        // glDrawElements(
+        //     GL_TRIANGLES,
+        //     static_cast<GLsizei>(indexAccessor.count),
+        //     GL_UNSIGNED_SHORT, // Assuming indices are unsigned shorts
+        //     reinterpret_cast<void*>(indexAccessor.byteOffset) // Offset within the buffer
+        // );
+
+        // MBGL_CHECK_ERROR(glUseProgram(program));
+        // MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, buffer));
+        // MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_pos_loc));
+        // MBGL_CHECK_ERROR(glVertexAttribPointer(a_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
+
+        // MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
+        //  glDrawElements(
+        //     GL_TRIANGLES,
+        //     indices.size(),
+        //     GL_UNSIGNED_SHORT,
+        //     (void*)0
+        // );
+
+        //MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLE_STRIP, 0, 24));
+
+        mbgl::LatLng latLngMesh { 38.889814, -77.035915 };
+        mbgl::LatLng latLng {param.latitude, param.longitude };
+
+        const float prescale = 1.0 / (std::cos(latLngMesh.latitude() * mbgl::util::DEG2RAD) * mbgl::util::M2PI * mbgl::util::EARTH_RADIUS_M);
+
+        mbgl::mat4 model;
+        mbgl::matrix::identity(model);
+        mbgl::matrix::scale(model, model, prescale, prescale, 1.0);
+
+        mbgl::mat4 world;
+        mbgl::matrix::identity(world);
+
+        mbgl::Point<double> world_pos {
+            (180.0 + latLngMesh.longitude()) / 360.0,
+            (180.0 - (180.0 / M_PI * std::log(std::tan(M_PI_4 + latLngMesh.latitude() * M_PI / 360.0)))) / 360.0
+        };
+
+        const double worldSize = mbgl::Projection::worldSize(std::pow(2.0, param.zoom));
+        mbgl::matrix::scale(world, world, worldSize, worldSize, 1.0);
+        mbgl::matrix::translate(world, world, world_pos.x, world_pos.y, 0.f);
+        
+        mbgl::mat4 resultMatrix {param.projectionMatrix};
+        mbgl::matrix::multiply(resultMatrix, resultMatrix, world);
+        mbgl::matrix::multiply(resultMatrix, resultMatrix, model);
+
+        mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
+    }
+
+    void contextLost() override {}
+
+    void deinitialize() override {
+         if (program) {
+                MBGL_CHECK_ERROR(glDeleteBuffers(1, &bufferHandle));
+                MBGL_CHECK_ERROR(glDeleteBuffers(1, &indexBufferHandle));
+                MBGL_CHECK_ERROR(glDetachShader(program, vertexShader));
+                MBGL_CHECK_ERROR(glDetachShader(program, fragmentShader));
+                MBGL_CHECK_ERROR(glDeleteShader(vertexShader));
+                MBGL_CHECK_ERROR(glDeleteShader(fragmentShader));
+                MBGL_CHECK_ERROR(glDeleteProgram(program));
+            }
+    }
+
+    GLuint program = 0;
+    GLuint vertexShader = 0;
+    GLuint fragmentShader = 0;
+    GLuint bufferHandle = 0;
+    GLuint indexBufferHandle = 0;
+    GLuint a_pos_loc = 0;
+    GLuint proj_mat_loc = 0;
+
+    std::vector<GLushort> indices;
+    std::vector<GLfloat> all_vertices;
+    std::vector<GLfloat> indexed_vertices;
+
+    int numVertices = 0;
+
+    tinygltf::Model model;
+};
 
 namespace {
 const std::string mbglPuckAssetsPath{MAPBOX_PUCK_ASSETS_PATH};
@@ -467,6 +795,28 @@ void GLFWView::onKey(GLFWwindow *window, int key, int /*scancode*/, int action, 
                 mbgl::Log::Error(mbgl::Event::General,
                                  "Fail to create render test! Base directory does not exist or permission denied.");
             }
+        } break;
+        case GLFW_KEY_F2: {
+            // view->map->getStyle().loadJSON(mbgl::util::read_file("test/fixtures/api/water.json"));
+            //view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915}).withZoom(11.0).withBearing(0.f).withPitch(0.f));
+            // auto layer = std::make_unique<mbgl::style::FillLayer>("landcover", "mapbox");
+            // layer->setSourceLayer("landcover");
+            // layer->setFillColor(mbgl::Color{ 1.0, 1.0, 0.0, 1.0 });
+            // view->map->getStyle().addLayer(std::move(layer));
+            if (auto layer = view->map->getStyle().getLayer("mesh")) {
+                layer->setVisibility(layer->getVisibility() == mbgl::style::VisibilityType::Visible ?
+                             mbgl::style::VisibilityType::None : mbgl::style::VisibilityType::Visible);
+                return;
+            }
+            view->map->getStyle().addLayer(std::make_unique<mbgl::style::CustomLayer>(
+                "mesh",
+                std::make_unique<MeshLayer>())
+                );
+            
+            mbgl::Log::Info(mbgl::Event::General, "Testing mesh!");
+        } break;
+        case GLFW_KEY_F3: {
+            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915 }).withZoom(11.0).withBearing(0.f).withPitch(0.f));
         } break;
         case GLFW_KEY_U: {
             auto bounds = view->map->getBounds();
