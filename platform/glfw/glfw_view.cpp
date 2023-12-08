@@ -472,12 +472,6 @@ void GLFWView::onKey(GLFWwindow *window, int key, int /*scancode*/, int action, 
             }
         } break;
         case GLFW_KEY_F2: {
-            // view->map->getStyle().loadJSON(mbgl::util::read_file("test/fixtures/api/water.json"));
-            //view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915}).withZoom(11.0).withBearing(0.f).withPitch(0.f));
-            // auto layer = std::make_unique<mbgl::style::FillLayer>("landcover", "mapbox");
-            // layer->setSourceLayer("landcover");
-            // layer->setFillColor(mbgl::Color{ 1.0, 1.0, 0.0, 1.0 });
-            // view->map->getStyle().addLayer(std::move(layer));
             if (auto layer = view->map->getStyle().getLayer("mesh")) {
                 layer->setVisibility(layer->getVisibility() == mbgl::style::VisibilityType::Visible ?
                              mbgl::style::VisibilityType::None : mbgl::style::VisibilityType::Visible);
@@ -492,6 +486,9 @@ void GLFWView::onKey(GLFWwindow *window, int key, int /*scancode*/, int action, 
         } break;
         case GLFW_KEY_F3: {
             view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915 }).withZoom(11.0).withBearing(0.f).withPitch(0.f));
+        } break;
+        case GLFW_KEY_F4: {
+            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 40.7128, -74.0060 }).withZoom(11.0).withBearing(0.f).withPitch(0.f));
         } break;
         case GLFW_KEY_U: {
             auto bounds = view->map->getBounds();

@@ -11,6 +11,7 @@ add_executable(
     ${PROJECT_SOURCE_DIR}/platform/glfw/settings_json.cpp
     ${PROJECT_SOURCE_DIR}/platform/glfw/test_writer.cpp
     ${PROJECT_SOURCE_DIR}/platform/glfw/mesh_render/mesh_layer.cpp
+    ${PROJECT_SOURCE_DIR}/platform/glfw/mesh_render/model.cpp
     ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/map/map_snapshotter.cpp
 )
 

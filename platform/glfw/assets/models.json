@@ -1,0 +1,19 @@
+{
+  "models": [
+    {
+      "path": "platform/glfw/assets/Fox.glb",
+      "latitude": 40.7128,
+      "longitude": -74.0060,
+      "rotation": {
+        "x": 90,
+        "y": 0,
+        "z": 0
+      }
+    },
+    {
+      "path": "platform/glfw/assets/Box.glb",
+      "latitude": 38.889814,
+      "longitude": -77.035915
+    }
+  ]
+}

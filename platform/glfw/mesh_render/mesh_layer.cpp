@@ -12,21 +12,19 @@
 #include <mbgl/util/mat2.hpp>
 #include <mbgl/gl/defines.hpp>
 
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <../../../vendor/tinygltf/tiny_gltf.h>
-
 #include <iostream>
+
+#include "rapidjson/document.h"
+#include <rapidjson/filereadstream.h>
 
 namespace mbgl {
 namespace platform {
 
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
-attribute vec3 a_pos;
+attribute vec3 vertex_pos;
 uniform mat4 proj_mat;
 void main() {
-    gl_Position = proj_mat * vec4(a_pos, 1.0);
+    gl_Position = proj_mat * vec4(vertex_pos, 1.0);
 }
 )MBGL_SHADER";
 
@@ -37,7 +35,6 @@ void main() {
 )MBGL_SHADER";
 
 void MeshLayer::initialize() {
-
     program = MBGL_CHECK_ERROR(glCreateProgram());
     vertexShader = MBGL_CHECK_ERROR(glCreateShader(GL_VERTEX_SHADER));
     fragmentShader = MBGL_CHECK_ERROR(glCreateShader(GL_FRAGMENT_SHADER));
@@ -49,110 +46,28 @@ void MeshLayer::initialize() {
     MBGL_CHECK_ERROR(glCompileShader(fragmentShader));
     MBGL_CHECK_ERROR(glAttachShader(program, fragmentShader));
     MBGL_CHECK_ERROR(glLinkProgram(program));
-    a_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_pos"));
-
-    std::string err;
-    std::string warn;
-    tinygltf::TinyGLTF loader;
-    tinygltf::Model model;
-
-    bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, "platform/glfw/assets/Fox.glb");
-    
-    const tinygltf::BufferView &bufferView = model.bufferViews[0];
-    const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
-    bool indexed = false;
-    if (model.meshes[0].primitives[0].indices >= 0) {
-        indexed = true;
-        const tinygltf::Accessor &indexAccessor = model.accessors[model.meshes[0].primitives[0].indices];
-        const tinygltf::BufferView& indexBufferView = model.bufferViews[indexAccessor.bufferView];
-        const tinygltf::Buffer& indexBuffer = model.buffers[indexBufferView.buffer];
-
-        numIndices = indexAccessor.count;
-
-        MBGL_CHECK_ERROR(glGenBuffers(1, &indexBufferHandle));
-        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
-        MBGL_CHECK_ERROR(glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBufferView.byteLength, &indexBuffer.data.at(0) + indexBufferView.byteOffset, GL_STATIC_DRAW));
-    }
-
-    auto positionAccessorIt = model.meshes[0].primitives[0].attributes.find("POSITION");
-    if (positionAccessorIt != model.meshes[0].primitives[0].attributes.end()) {
-        const int positionAccessorIndex = positionAccessorIt->second;
-        const tinygltf::Accessor& accessor = model.accessors[positionAccessorIndex];
-
-        const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
-        const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
-
-        const float* positionsData = reinterpret_cast<const float*>(&buffer.data[bufferView.byteOffset + accessor.byteOffset]);
-
-        numVertices = static_cast<int>(accessor.count);
-        MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
-        MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
-        MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, numVertices * 3 * sizeof(GLfloat), positionsData, GL_STATIC_DRAW));
-
-    }
-
+    vertex_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "vertex_pos"));
     proj_mat_loc = glGetUniformLocation(program, "proj_mat");
+
+    LoadModels("platform/glfw/assets/models.json");
 }
 
 void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
     MBGL_CHECK_ERROR(glUseProgram(program));
-    
-    //object's lat/lng coordinates
-    mbgl::LatLng latLngMesh { 38.889814, -77.035915 };
 
-    //camera's lat/lng coordinates
-    mbgl::LatLng latLng {param.latitude, param.longitude };
-
-    //need to convert x and y from meters to tile coordinates
-    const float prescale = 1.0 / (std::cos(latLngMesh.latitude() * mbgl::util::DEG2RAD) * mbgl::util::M2PI * mbgl::util::EARTH_RADIUS_M);
-
-    mbgl::mat4 model_matrix;
-    mbgl::matrix::identity(model_matrix);
-    mbgl::matrix::scale(model_matrix, model_matrix, prescale, prescale, 1.0);
-
-    //TODO: for fox only
-    mbgl::matrix::rotate_x(model_matrix, model_matrix, M_PI_2);
-
-    mbgl::mat4 world_matrix;
-    mbgl::matrix::identity(world_matrix);
-
-    mbgl::Point<double> world_pos {
-        (180.0 + latLngMesh.longitude()) / 360.0,
-        (180.0 - (180.0 / M_PI * std::log(std::tan(M_PI_4 + latLngMesh.latitude() * M_PI / 360.0)))) / 360.0
-    };
-
-    const double worldSize = mbgl::Projection::worldSize(std::pow(2.0, param.zoom));
-    mbgl::matrix::scale(world_matrix, world_matrix, worldSize, worldSize, 1.0);
-    mbgl::matrix::translate(world_matrix, world_matrix, world_pos.x, world_pos.y, 0.f);
-    
-    mbgl::mat4 resultMatrix {param.projectionMatrix};
-    mbgl::matrix::multiply(resultMatrix, resultMatrix, world_matrix);
-    mbgl::matrix::multiply(resultMatrix, resultMatrix, model_matrix);
-
-    mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
-    
-    MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_pos_loc));
-    MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
-    MBGL_CHECK_ERROR(glVertexAttribPointer(a_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
-
-    if (numIndices == 0) {
-        MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, numVertices));
-    } else {
-        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
-        glDrawElements(
-            GL_TRIANGLE_STRIP,
-            numIndices,
-            GL_UNSIGNED_SHORT,
-            (void*)0
-        );
+    //every model in its own draw call. 
+    //It's possible to do everything with one buffer, but we don't have a lot of models, especially with bounds test
+    for (const auto& model : models) {
+        RenderModel(model.get(), param);
     }
-    MBGL_CHECK_ERROR(glDisableVertexAttribArray(a_pos_loc));
 }
 
 void MeshLayer::deinitialize() {
         if (program) {
-            MBGL_CHECK_ERROR(glDeleteBuffers(1, &bufferHandle));
-            MBGL_CHECK_ERROR(glDeleteBuffers(1, &indexBufferHandle));
+            for (const auto& model : models) {
+                MBGL_CHECK_ERROR(glDeleteBuffers(1, &model->bufferHandle));
+                MBGL_CHECK_ERROR(glDeleteBuffers(1, &model->indexBufferHandle));
+            }
             MBGL_CHECK_ERROR(glDetachShader(program, vertexShader));
             MBGL_CHECK_ERROR(glDetachShader(program, fragmentShader));
             MBGL_CHECK_ERROR(glDeleteShader(vertexShader));
@@ -160,5 +75,101 @@ void MeshLayer::deinitialize() {
             MBGL_CHECK_ERROR(glDeleteProgram(program));
         }
 }
+
+
+void MeshLayer::LoadModels(const char* file_path) {
+    FILE* file = fopen(file_path, "r");
+    char buffer[65536];
+    rapidjson::FileReadStream inputStream(file, buffer, sizeof(buffer));
+    rapidjson::Document document;
+    document.ParseStream(inputStream);
+
+    // Access the models array
+    const auto& modelsJson = document["models"];
+    if (!modelsJson.IsArray()) {
+        throw std::runtime_error(("Input file (" + std::string(file_path) + ") is not valid json"));
+    }
+    for (rapidjson::SizeType i = 0; i < modelsJson.Size(); ++i) {
+        const auto& modelJson = modelsJson[i];
+        models.push_back(std::make_unique<Model>());
+        auto glbPath = modelJson["path"].GetString();
+        if (!models.back()->LoadModel(glbPath)) {
+            throw std::runtime_error(("Can't load model (" + std::string(glbPath) + ")"));
+        }
+        double latitude = modelJson["latitude"].GetDouble();
+        double longitude = modelJson["longitude"].GetDouble();
+        models.back()->SetCoordinates(latitude, longitude);
+        if (modelJson.HasMember("rotation")) {
+            auto& rotationJson = modelJson["rotation"];
+            vec3 rotation;
+            if (rotationJson.HasMember("x")) {
+                rotation[0] = rotationJson["x"].GetDouble();
+            }
+            if (rotationJson.HasMember("y")) {
+                rotation[1] = rotationJson["y"].GetDouble();
+            }
+            if (rotationJson.HasMember("z")) {
+                rotation[2] = rotationJson["z"].GetDouble();
+            }
+            models.back()->Rotate(rotation);
+        }
+    }
+    fclose(file);
+}
+
+void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderParameters& param) {
+    if (!model) {
+        assert(model);
+        return;
+    }
+    
+    const auto scale = std::pow(2.0, param.zoom);
+    const double worldSize = mbgl::Projection::worldSize(scale);
+
+    //TODO: probably don't need to convert it from latitude/longitude, we already have world coordinates
+    Point<double> pt = Projection::project(model->latLng, scale) / util::tileSize;
+    vec4 c = {{pt.x, pt.y, 0, 1}};
+    vec4 p;
+    auto screen_matrix = param.projectionMatrix;
+    matrix::scale(screen_matrix, screen_matrix, util::tileSize, util::tileSize, 1.0);
+    matrix::transformMat4(p, c, screen_matrix);
+    ScreenCoordinate screenCoord = {p[0] / p[3], p[1] / p[3]};
+
+    //TODO: Checks only center for now, we just assume it won't take two screens
+    if (screenCoord.x < -1.5 || screenCoord.x > 1.5 || screenCoord.y < -1.5 || screenCoord.y > 1.5) {
+        //out of bounds
+        return;
+    }
+
+    mbgl::mat4 world_matrix;
+    mbgl::matrix::identity(world_matrix);
+
+    mbgl::matrix::scale(world_matrix, world_matrix, worldSize, worldSize, 1.0);
+    mbgl::matrix::translate(world_matrix, world_matrix, model->world_pos.x, model->world_pos.y, 0.f);
+    
+    mbgl::mat4 resultMatrix {param.projectionMatrix};
+    mbgl::matrix::multiply(resultMatrix, resultMatrix, world_matrix);
+    mbgl::matrix::multiply(resultMatrix, resultMatrix, model->model_matrix);
+
+    mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
+    
+    MBGL_CHECK_ERROR(glEnableVertexAttribArray(vertex_pos_loc));
+    MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, model->bufferHandle));
+    MBGL_CHECK_ERROR(glVertexAttribPointer(vertex_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
+
+    if (model->numIndices == 0) {
+        MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, model->numVertices));
+    } else {
+        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, model->indexBufferHandle));
+        glDrawElements(
+            GL_TRIANGLE_STRIP,
+            model->numIndices,
+            GL_UNSIGNED_SHORT,
+            (void*)0
+        );
+    }
+    MBGL_CHECK_ERROR(glDisableVertexAttribArray(vertex_pos_loc));
+}
+
 } //namespace platform
 } //namespace mbgl
