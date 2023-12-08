@@ -97,23 +97,6 @@ void MeshLayer::initialize() {
 void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
     MBGL_CHECK_ERROR(glUseProgram(program));
     
-    MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_pos_loc));
-    MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
-    MBGL_CHECK_ERROR(glVertexAttribPointer(a_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
-
-    if (numIndices == 0) {
-        MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, numVertices));
-    } else {
-        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
-        glDrawElements(
-            GL_TRIANGLE_STRIP,
-            numIndices,
-            GL_UNSIGNED_SHORT,
-            (void*)0
-        );
-    }
-    MBGL_CHECK_ERROR(glDisableVertexAttribArray(a_pos_loc));
-
     //object's lat/lng coordinates
     mbgl::LatLng latLngMesh { 38.889814, -77.035915 };
 
@@ -147,6 +130,23 @@ void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
     mbgl::matrix::multiply(resultMatrix, resultMatrix, model_matrix);
 
     mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
+    
+    MBGL_CHECK_ERROR(glEnableVertexAttribArray(a_pos_loc));
+    MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
+    MBGL_CHECK_ERROR(glVertexAttribPointer(a_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
+
+    if (numIndices == 0) {
+        MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, numVertices));
+    } else {
+        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferHandle));
+        glDrawElements(
+            GL_TRIANGLE_STRIP,
+            numIndices,
+            GL_UNSIGNED_SHORT,
+            (void*)0
+        );
+    }
+    MBGL_CHECK_ERROR(glDisableVertexAttribArray(a_pos_loc));
 }
 
 void MeshLayer::deinitialize() {
