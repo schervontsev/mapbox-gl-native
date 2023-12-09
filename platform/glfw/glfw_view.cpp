@@ -485,10 +485,10 @@ void GLFWView::onKey(GLFWwindow *window, int key, int /*scancode*/, int action, 
             mbgl::Log::Info(mbgl::Event::General, "Testing mesh!");
         } break;
         case GLFW_KEY_F3: {
-            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915 }).withZoom(11.0).withBearing(0.f).withPitch(0.f));
+            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915 }).withZoom(18.0).withBearing(0.f).withPitch(0.f));
         } break;
         case GLFW_KEY_F4: {
-            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 40.7128, -74.0060 }).withZoom(11.0).withBearing(0.f).withPitch(0.f));
+            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 40.7128, -74.0060 }).withZoom(15.0).withBearing(0.f).withPitch(0.f));
         } break;
         case GLFW_KEY_U: {
             auto bounds = view->map->getBounds();

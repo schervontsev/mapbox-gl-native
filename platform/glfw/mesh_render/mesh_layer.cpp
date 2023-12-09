@@ -5,11 +5,12 @@
 #include <mbgl/style/layers/fill_layer.hpp>
 #include <mbgl/map/camera.hpp>
 #include <mbgl/style/layers/background_layer.hpp>
-#include <mbgl/util/mat4.hpp>
 #include <mbgl/gl/uniform.hpp>
 #include <mbgl/util/projection.hpp>
 #include <mbgl/map/transform_state.hpp>
 #include <mbgl/util/mat2.hpp>
+#include <mbgl/util/mat3.hpp>
+#include <mbgl/util/mat4.hpp>
 #include <mbgl/gl/defines.hpp>
 
 #include <iostream>
@@ -21,10 +22,10 @@ namespace mbgl {
 namespace platform {
 
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
-attribute vec3 vertex_pos;
+attribute vec3 a_pos;
 uniform mat4 proj_mat;
 void main() {
-    gl_Position = proj_mat * vec4(vertex_pos, 1.0);
+    gl_Position = proj_mat * vec4(a_pos, 1.0);
 }
 )MBGL_SHADER";
 
@@ -46,8 +47,12 @@ void MeshLayer::initialize() {
     MBGL_CHECK_ERROR(glCompileShader(fragmentShader));
     MBGL_CHECK_ERROR(glAttachShader(program, fragmentShader));
     MBGL_CHECK_ERROR(glLinkProgram(program));
-    vertex_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "vertex_pos"));
+
+    vertex_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_pos"));
     proj_mat_loc = glGetUniformLocation(program, "proj_mat");
+
+    texCoord_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_texCoord"));
+    image_loc = MBGL_CHECK_ERROR(glGetUniformLocation(program, "u_image"));
 
     LoadModels("platform/glfw/assets/models.json");
 }
@@ -66,7 +71,6 @@ void MeshLayer::deinitialize() {
         if (program) {
             for (const auto& model : models) {
                 MBGL_CHECK_ERROR(glDeleteBuffers(1, &model->bufferHandle));
-                MBGL_CHECK_ERROR(glDeleteBuffers(1, &model->indexBufferHandle));
             }
             MBGL_CHECK_ERROR(glDetachShader(program, vertexShader));
             MBGL_CHECK_ERROR(glDetachShader(program, fragmentShader));
@@ -126,21 +130,6 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     const auto scale = std::pow(2.0, param.zoom);
     const double worldSize = mbgl::Projection::worldSize(scale);
 
-    //TODO: probably don't need to convert it from latitude/longitude, we already have world coordinates
-    Point<double> pt = Projection::project(model->latLng, scale) / util::tileSize;
-    vec4 c = {{pt.x, pt.y, 0, 1}};
-    vec4 p;
-    auto screen_matrix = param.projectionMatrix;
-    matrix::scale(screen_matrix, screen_matrix, util::tileSize, util::tileSize, 1.0);
-    matrix::transformMat4(p, c, screen_matrix);
-    ScreenCoordinate screenCoord = {p[0] / p[3], p[1] / p[3]};
-
-    //TODO: Checks only center for now, we just assume it won't take two screens
-    if (screenCoord.x < -1.5 || screenCoord.x > 1.5 || screenCoord.y < -1.5 || screenCoord.y > 1.5) {
-        //out of bounds
-        return;
-    }
-
     mbgl::mat4 world_matrix;
     mbgl::matrix::identity(world_matrix);
 
@@ -151,24 +140,53 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     mbgl::matrix::multiply(resultMatrix, resultMatrix, world_matrix);
     mbgl::matrix::multiply(resultMatrix, resultMatrix, model->model_matrix);
 
+    //check culling (sphere)
+    mat4 screen_matrix;
+    matrix::invert(screen_matrix, resultMatrix);
+
+    util::Frustum frustum = util::Frustum::fromInvProjMatrix(screen_matrix, 1.0, 0.0, true);
+
+    const float boundRadius = model->boundsRadius;
+    auto boundsCenter = model->boundsCenter;
+
+    auto isSphereIntersect = [boundRadius, boundsCenter](const vec4& plane)-> bool {
+        auto dist = mbgl::vec3Dot({plane[0], plane[1], plane[2]}, boundsCenter) + plane[3];
+        return dist < -boundRadius || std::abs(dist) < boundRadius;
+    };
+
+    //can't use default frustum.intersects because it expects aabb.z to be 0
+    auto planes = frustum.getPlanes();
+    bool intersect = false;
+    for (const auto& plane : planes) {
+        if (!isSphereIntersect(plane)) {
+            //culling happened
+            return;
+        }
+    }
+
+    //actual rendering
     mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
+
+    //glBindTexture(GL_TEXTURE_2D, model->texture_loc);
     
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(vertex_pos_loc));
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, model->bufferHandle));
     MBGL_CHECK_ERROR(glVertexAttribPointer(vertex_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
+    //MBGL_CHECK_ERROR(glVertexAttribPointer(texCoord_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
 
     if (model->numIndices == 0) {
         MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, model->numVertices));
     } else {
-        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, model->indexBufferHandle));
+        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, model->bufferHandle));
         glDrawElements(
             GL_TRIANGLE_STRIP,
             model->numIndices,
             GL_UNSIGNED_SHORT,
-            (void*)0
+            (void*)model->indexBufferOffset
         );
     }
     MBGL_CHECK_ERROR(glDisableVertexAttribArray(vertex_pos_loc));
+    MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, 0));
 }
 
 } //namespace platform

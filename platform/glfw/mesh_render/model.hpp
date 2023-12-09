@@ -4,6 +4,7 @@
 #include <mbgl/util/mat4.hpp>
 #include <mbgl/util/geometry.hpp>
 #include <mbgl/util/geo.hpp>
+#include <mbgl/util/bounding_volumes.hpp>
 
 namespace mbgl {
 namespace platform {
@@ -19,10 +20,14 @@ public:
     Point<double> world_pos;
     mbgl::mat4 model_matrix;
 
-    GLuint bufferHandle = 0;
-    GLuint indexBufferHandle = 0;
+    float boundsRadius = 0;
+    vec3 boundsCenter;
 
-    GLuint a_pos_loc = 0;
+    GLuint bufferHandle = 0;
+    
+    GLuint indexBufferOffset = 0;
+
+    GLuint texture_handle = 0;
 
     int numVertices = 0;
     size_t numIndices = 0;
