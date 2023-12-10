@@ -3,8 +3,8 @@
     {
       "path": "platform/glfw/assets/Fox.glb",
       "cw_orient": true,
-      "latitude": 40.7128,
-      "longitude": -74.0060,
+      "latitude": 60.171367,
+      "longitude": 24.941359,
       "rotation": {
         "x": 90,
         "y": 0,
@@ -18,6 +18,19 @@
       "model_index": 0,
       "latitude": 38.889814,
       "longitude": -77.035915,
+      "rotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    },
+    {
+      "path": "platform/glfw/assets/AnimatedCube.gltf",
+      "flipY": true,
+      "cw_orient": true,
+      "model_index": 0,
+      "latitude": 40.7128,
+      "longitude": -74.0060,
       "rotation": {
         "x": 0,
         "y": 0,

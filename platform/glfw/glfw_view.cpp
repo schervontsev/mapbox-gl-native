@@ -227,7 +227,7 @@ GLFWView::GLFWView(bool fullscreen_, bool benchmark_, const mbgl::ResourceOption
     printf("- Press `F1` to generate a render test for the current view\n");
     printf("\n");
     printf("- Press `F2` to generate a layer with 3d models\n");
-    printf("- Press `F3-F4` to switch between 3d models\n");
+    printf("- Press `F3-F5` to switch between 3d models\n");
     printf("\n");
     printf("- Press `Tab` to cycle through the map debug options\n");
     printf("- Press `Esc` to quit\n");
@@ -488,10 +488,13 @@ void GLFWView::onKey(GLFWwindow *window, int key, int /*scancode*/, int action, 
             mbgl::Log::Info(mbgl::Event::General, "Created mesh layer");
         } break;
         case GLFW_KEY_F3: {
-            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915 }).withZoom(18.0).withBearing(0.f).withPitch(0.f));
+            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915 }).withZoom(20.0).withBearing(0.f).withPitch(15.f));
         } break;
         case GLFW_KEY_F4: {
-            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 40.7128, -74.0060 }).withZoom(15.0).withBearing(0.f).withPitch(0.f));
+            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 40.7128, -74.0060 }).withZoom(20.0).withBearing(0.f).withPitch(20.f));
+        } break;
+        case GLFW_KEY_F5: {
+            view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 60.171367, 24.941359 }).withZoom(17.0).withBearing(0.f).withPitch(15.f));
         } break;
         case GLFW_KEY_U: {
             auto bounds = view->map->getBounds();
