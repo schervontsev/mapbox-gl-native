@@ -226,6 +226,9 @@ GLFWView::GLFWView(bool fullscreen_, bool benchmark_, const mbgl::ResourceOption
     printf("\n");
     printf("- Press `F1` to generate a render test for the current view\n");
     printf("\n");
+    printf("- Press `F2` to generate a layer with 3d models\n");
+    printf("- Press `F3-F4` to switch between 3d models\n");
+    printf("\n");
     printf("- Press `Tab` to cycle through the map debug options\n");
     printf("- Press `Esc` to quit\n");
     printf("\n");
@@ -482,7 +485,7 @@ void GLFWView::onKey(GLFWwindow *window, int key, int /*scancode*/, int action, 
                 std::make_unique<mbgl::platform::MeshLayer>())
                 );
             
-            mbgl::Log::Info(mbgl::Event::General, "Testing mesh!");
+            mbgl::Log::Info(mbgl::Event::General, "Created mesh layer");
         } break;
         case GLFW_KEY_F3: {
             view->map->jumpTo(mbgl::CameraOptions().withCenter(mbgl::LatLng { 38.889814, -77.035915 }).withZoom(18.0).withBearing(0.f).withPitch(0.f));

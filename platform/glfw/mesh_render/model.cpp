@@ -23,14 +23,20 @@
 namespace mbgl {
 namespace platform {
 
-bool Model::LoadModel(const std::string& path) {
+bool Model::LoadModel(const std::string& filePath, bool flipY) {
     std::string err;
     std::string warn;
     tinygltf::TinyGLTF loader;
     tinygltf::Model model;
 
-    if (!loader.LoadBinaryFromFile(&model, &err, &warn, path)) {
-        return false;
+    if (filePath.size() >= 4 && filePath.substr(filePath.size() - 4) == ".glb") {
+        if (!loader.LoadBinaryFromFile(&model, &err, &warn, filePath)) {
+            return false;
+        }
+    } else {
+        if (!loader.LoadASCIIFromFile(&model, &err, &warn, filePath)) {
+            return false;
+        }
     }
 
     //rendering only the first primitive of the first model
@@ -40,6 +46,7 @@ bool Model::LoadModel(const std::string& path) {
     //vertices
 
     const float* positionsData;
+    GLsizeiptr verticesLen = 0;
 
     auto positionAccessorIt = model.meshes[0].primitives[0].attributes.find("POSITION");
     if (positionAccessorIt != model.meshes[0].primitives[0].attributes.end()) {
@@ -50,7 +57,8 @@ bool Model::LoadModel(const std::string& path) {
         const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
 
         positionsData = reinterpret_cast<const float*>(&buffer.data[bufferView.byteOffset + accessor.byteOffset]);
-        indexBufferOffset = bufferView.byteLength;
+        verticesLen = bufferView.byteLength;
+        indexBufferOffset = verticesLen;
 
         //find aabb for bounds
         numVertices = static_cast<int>(accessor.count);
@@ -81,31 +89,73 @@ bool Model::LoadModel(const std::string& path) {
 
         numIndices = indexAccessor.count;
         indexLen = indexBufferView.byteLength;
-        indexData = reinterpret_cast<const unsigned short*>(&indexBuffer.data.at(0) + indexBufferView.byteOffset);
+        indexData = reinterpret_cast<const unsigned short*>(&indexBuffer.data[indexBufferView.byteOffset + indexAccessor.byteOffset]);
     }
 
+    texCoordBufferOffset = verticesLen + indexLen;
+    GLsizeiptr texCoordLen = 0;
+    float* texCoordData;
+
+    if (!model.images.empty()) {
+        auto texCoordAccessorIt = model.meshes[0].primitives[0].attributes.find("TEXCOORD_0");
+        if (texCoordAccessorIt != model.meshes[0].primitives[0].attributes.end()) {
+            const int accessorIndex = texCoordAccessorIt->second;
+            const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
+
+            const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
+            tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+
+            texCoordData = reinterpret_cast<float*>(&buffer.data[bufferView.byteOffset + accessor.byteOffset]);
+            if (flipY) {
+                // Modify the texture coordinates here (flip Y-coordinate)
+                for (size_t i = 0; i < accessor.count; ++i) {
+                    float u = texCoordData[i * accessor.type];
+                    float v = texCoordData[i * accessor.type + 1]; // Assuming 2 components for texture coordinates
+
+                    // Flip the y-coordinate
+                    v = 1.0f - v;
+
+                    // Update the texCoordData directly in the buffer
+                    texCoordData[i * accessor.type] = u;
+                    texCoordData[i * accessor.type + 1] = v;
+                }
+            }
+            texCoordLen = bufferView.byteLength;
+            
+            //Only one texture is supported
+            const tinygltf::Image& image = model.images[0];
+            glGenTextures(1, &texture_handle);
+            glBindTexture(GL_TEXTURE_2D, texture_handle);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.image.data());
+            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR));
+            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+            MBGL_CHECK_ERROR(glGenerateMipmap(GL_TEXTURE_2D));
+            MBGL_CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, 0));
+        } else {
+            return false;
+        }
+    } else {
+        return false;
+    }
 
     MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
 
-    MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, indexBufferOffset + indexLen, nullptr, GL_STATIC_DRAW));
-    MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, 0, indexBufferOffset, positionsData));
-    MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, indexBufferOffset, indexLen, indexData));
+    MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, verticesLen + indexLen + texCoordLen, nullptr, GL_STATIC_DRAW));
+    MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, 0, verticesLen, positionsData));
+    if (indexLen > 0) {
+        MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, indexBufferOffset, indexLen, indexData));
+    }
+    MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, texCoordBufferOffset, texCoordLen, texCoordData));
     
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, 0));
 
-    if (!model.images.empty()) {
-        const tinygltf::Image& image = model.images[0];
-        //const tinygltf::Accessor &texturePosAccessor = model.accessors[model.]
-        glGenTextures(1, &texture_handle);
-        glBindTexture(GL_TEXTURE_2D, texture_handle);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.image.data());
-    }
     return true;
 }
 
 void Model::SetCoordinates(double lat, double lng) {
-    latLng = {lat, lng};
     //need to convert x and y from meters to tile coordinates
     const float prescale = 1.0 / (std::cos(lat * mbgl::util::DEG2RAD) * mbgl::util::M2PI * mbgl::util::EARTH_RADIUS_M);
 

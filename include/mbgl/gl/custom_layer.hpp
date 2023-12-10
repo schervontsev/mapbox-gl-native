@@ -19,6 +19,7 @@ struct CustomLayerRenderParameters {
     double bearing;
     double pitch;
     double fieldOfView;
+    double depthMin;
     std::array<double, 16> projectionMatrix;
 };
 

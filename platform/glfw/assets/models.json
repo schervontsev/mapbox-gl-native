@@ -2,6 +2,7 @@
   "models": [
     {
       "path": "platform/glfw/assets/Fox.glb",
+      "cw_orient": true,
       "latitude": 40.7128,
       "longitude": -74.0060,
       "rotation": {
@@ -11,9 +12,15 @@
       }
     },
     {
-      "path": "platform/glfw/assets/Box.glb",
+      "path": "platform/glfw/assets/Box With Spaces.gltf",
+      "flipY": true,
       "latitude": 38.889814,
-      "longitude": -77.035915
+      "longitude": -77.035915,
+      "rotation": {
+        "x": 180,
+        "y": 0,
+        "z": 0
+      }
     }
   ]
 }

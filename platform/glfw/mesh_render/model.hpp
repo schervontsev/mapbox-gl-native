@@ -11,21 +11,23 @@ namespace platform {
 
 struct Model {
 public:
-    bool LoadModel(const std::string& path);
+    bool LoadModel(const std::string& filePath, bool flipY);
     void SetCoordinates(double lat, double lng);
     void Rotate(vec3 euler);
 
 public:
-    LatLng latLng;
     Point<double> world_pos;
     mbgl::mat4 model_matrix;
+    
+    bool cw_orient = false;
 
     float boundsRadius = 0;
     vec3 boundsCenter;
 
     GLuint bufferHandle = 0;
-    
+
     GLuint indexBufferOffset = 0;
+    GLuint texCoordBufferOffset = 0;
 
     GLuint texture_handle = 0;
 
