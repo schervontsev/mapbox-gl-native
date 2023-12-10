@@ -24,31 +24,39 @@ namespace platform {
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
 attribute vec3 a_pos;
 attribute vec2 a_texCoord;
-
 attribute vec3 a_norm;
 
 uniform mat4 u_matrix;
+uniform vec3 u_lightDirection;
+
 varying vec2 v_texCoord;
 varying vec3 v_norm;
+varying vec3 light_dir;
 
 void main() {
     gl_Position = u_matrix * vec4(a_pos, 1.0);
     v_texCoord = a_texCoord;
-    v_norm = a_norm;
+    v_norm = normalize(a_norm);
+    light_dir = normalize(u_lightDirection);
 }
 
 )MBGL_SHADER";
 
 static const GLchar* fragmentShaderSource = R"MBGL_SHADER(
 uniform sampler2D u_Texture;
+
 varying vec2 v_texCoord;
 varying vec3 v_norm;
+varying vec3 light_dir;
 
 void main() {
     vec4 color = texture2D(u_Texture, v_texCoord);
-    gl_FragColor = color;
-    
-    //gl_FragColor = vec4(v_norm, 1.0);
+
+    vec3 light_color = vec3(1.0, 1.0, 1.0);
+    float diffuse_str = max(dot(v_norm, -light_dir), 0.0);
+    vec3 diffuse = vec3(0.5, 0.5, 0.8) + light_color * diffuse_str;
+
+    gl_FragColor = vec4(diffuse * color, color.a);
 }
 )MBGL_SHADER";
 
@@ -67,6 +75,7 @@ void MeshLayer::initialize() {
 
     vertex_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_pos"));
     proj_mat_loc = glGetUniformLocation(program, "u_matrix");
+    light_pos_loc = glGetUniformLocation(program, "u_lightDirection");
 
     texCoord_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_texCoord"));
     image_loc = MBGL_CHECK_ERROR(glGetUniformLocation(program, "u_Texture"));
@@ -200,6 +209,9 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     }
     //actual rendering
     mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
+
+    GLfloat light_dir[3] = {0.5f, 0.5f, -1.f};
+    glUniform3fv(light_pos_loc, 1, light_dir);
 
     MBGL_CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, model->texture_handle));
     

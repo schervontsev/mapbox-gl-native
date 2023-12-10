@@ -27,6 +27,7 @@ private:
     
     GLuint proj_mat_loc = 0;
     GLuint vertex_pos_loc = 0;
+    GLuint light_pos_loc = 0;
     
     GLuint texCoord_loc = 0;
     GLuint image_loc = 0;
