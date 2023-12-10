@@ -14,10 +14,12 @@
     {
       "path": "platform/glfw/assets/Box With Spaces.gltf",
       "flipY": true,
+      "cw_orient": true,
+      "model_index": 0,
       "latitude": 38.889814,
       "longitude": -77.035915,
       "rotation": {
-        "x": 180,
+        "x": 0,
         "y": 0,
         "z": 0
       }

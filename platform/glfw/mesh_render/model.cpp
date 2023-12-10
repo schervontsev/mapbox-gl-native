@@ -39,17 +39,15 @@ bool Model::LoadModel(const std::string& filePath, bool flipY) {
         }
     }
 
-    //rendering only the first primitive of the first model
-    const tinygltf::BufferView &bufferView = model.bufferViews[0];
-    const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
+    //TODO: Most of this can be combined into one function/lambda
 
     //vertices
 
     const float* positionsData;
     GLsizeiptr verticesLen = 0;
 
-    auto positionAccessorIt = model.meshes[0].primitives[0].attributes.find("POSITION");
-    if (positionAccessorIt != model.meshes[0].primitives[0].attributes.end()) {
+    auto positionAccessorIt = model.meshes[model_index].primitives[0].attributes.find("POSITION");
+    if (positionAccessorIt != model.meshes[model_index].primitives[0].attributes.end()) {
         const int positionAccessorIndex = positionAccessorIt->second;
         const tinygltf::Accessor& accessor = model.accessors[positionAccessorIndex];
 
@@ -81,7 +79,7 @@ bool Model::LoadModel(const std::string& filePath, bool flipY) {
     GLsizeiptr indexLen = 0;
     const unsigned short* indexData;
     
-    if (model.meshes[0].primitives[0].indices >= 0) {
+    if (model.meshes[model_index].primitives[0].indices >= 0) {
         indexed = true;
         const tinygltf::Accessor &indexAccessor = model.accessors[model.meshes[0].primitives[0].indices];
         const tinygltf::BufferView& indexBufferView = model.bufferViews[indexAccessor.bufferView];
@@ -92,13 +90,22 @@ bool Model::LoadModel(const std::string& filePath, bool flipY) {
         indexData = reinterpret_cast<const unsigned short*>(&indexBuffer.data[indexBufferView.byteOffset + indexAccessor.byteOffset]);
     }
 
+    //animations (only one for now)
+    GLsizeiptr bonesLen = 0;
+    const unsigned short* bonesData;
+    
+    if (!model.animations.empty()) {
+        tinygltf::Animation& firstAnimation = model.animations[0];
+    }
+
+    //texture (only one for now)
     texCoordBufferOffset = verticesLen + indexLen;
     GLsizeiptr texCoordLen = 0;
     float* texCoordData;
 
     if (!model.images.empty()) {
-        auto texCoordAccessorIt = model.meshes[0].primitives[0].attributes.find("TEXCOORD_0");
-        if (texCoordAccessorIt != model.meshes[0].primitives[0].attributes.end()) {
+        auto texCoordAccessorIt = model.meshes[model_index].primitives[0].attributes.find("TEXCOORD_0");
+        if (texCoordAccessorIt != model.meshes[model_index].primitives[0].attributes.end()) {
             const int accessorIndex = texCoordAccessorIt->second;
             const tinygltf::Accessor& accessor = model.accessors[accessorIndex];
 
@@ -127,10 +134,7 @@ bool Model::LoadModel(const std::string& filePath, bool flipY) {
             glGenTextures(1, &texture_handle);
             glBindTexture(GL_TEXTURE_2D, texture_handle);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.image.data());
-            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
-            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR));
-            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-            MBGL_CHECK_ERROR(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+            //TODO: set texture parameters
             MBGL_CHECK_ERROR(glGenerateMipmap(GL_TEXTURE_2D));
             MBGL_CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, 0));
         } else {
@@ -140,16 +144,34 @@ bool Model::LoadModel(const std::string& filePath, bool flipY) {
         return false;
     }
 
+    GLsizeiptr normalLen = 0;
+    const float* normalData;
+
+    normalBufferOffset = indexLen + verticesLen + texCoordLen;
+
+    auto normalAccessorIt = model.meshes[model_index].primitives[0].attributes.find("NORMAL");
+    if (normalAccessorIt != model.meshes[model_index].primitives[0].attributes.end()) {
+        const int normalAccessorIndex = normalAccessorIt->second;
+        const tinygltf::Accessor& accessor = model.accessors[normalAccessorIndex];
+
+        const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
+        const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+
+        normalData = reinterpret_cast<const float*>(&buffer.data[bufferView.byteOffset + accessor.byteOffset]);
+        normalLen = bufferView.byteLength;
+    }
+
     MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
 
-    MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, verticesLen + indexLen + texCoordLen, nullptr, GL_STATIC_DRAW));
+    MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, verticesLen + indexLen + texCoordLen + normalLen, nullptr, GL_STATIC_DRAW));
     MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, 0, verticesLen, positionsData));
     if (indexLen > 0) {
         MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, indexBufferOffset, indexLen, indexData));
     }
     MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, texCoordBufferOffset, texCoordLen, texCoordData));
-    
+    MBGL_CHECK_ERROR(glBufferSubData(GL_ARRAY_BUFFER, normalBufferOffset, normalLen, normalData));
+
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, 0));
 
     return true;

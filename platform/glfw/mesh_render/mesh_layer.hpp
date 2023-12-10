@@ -30,6 +30,7 @@ private:
     
     GLuint texCoord_loc = 0;
     GLuint image_loc = 0;
+    GLuint normal_loc = 0;
 };
 
 } //namespace platform

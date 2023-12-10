@@ -24,21 +24,30 @@ namespace platform {
 static const GLchar* vertexShaderSource = R"MBGL_SHADER(
 attribute vec3 a_pos;
 attribute vec2 a_texCoord;
+
+attribute vec3 a_norm;
+
 uniform mat4 u_matrix;
 varying vec2 v_texCoord;
+varying vec3 v_norm;
+
 void main() {
-    gl_Position = u_matrix * vec4(a_pos.x, a_pos.y, a_pos.z, 1.0);
+    gl_Position = u_matrix * vec4(a_pos, 1.0);
     v_texCoord = a_texCoord;
+    v_norm = a_norm;
 }
+
 )MBGL_SHADER";
 
 static const GLchar* fragmentShaderSource = R"MBGL_SHADER(
 uniform sampler2D u_Texture;
 varying vec2 v_texCoord;
+varying vec3 v_norm;
 
 void main() {
     vec4 color = texture2D(u_Texture, v_texCoord);
     gl_FragColor = color;
+    //gl_FragColor = vec4(v_norm, 1.0);
 }
 )MBGL_SHADER";
 
@@ -61,6 +70,8 @@ void MeshLayer::initialize() {
     texCoord_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_texCoord"));
     image_loc = MBGL_CHECK_ERROR(glGetUniformLocation(program, "u_Texture"));
 
+    normal_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_norm"));
+
     LoadModels("platform/glfw/assets/models.json");
 }
 
@@ -71,9 +82,6 @@ void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
     glCullFace(GL_BACK);
     glDepthMask(GL_TRUE);
     glDepthRangef(0.0, param.depthMin);
-
-
-    auto test = glIsEnabled(GL_DEPTH_TEST);
 
     MBGL_CHECK_ERROR(glUseProgram(program));
 
@@ -115,6 +123,7 @@ void MeshLayer::LoadModels(const char* file_path) {
         models.push_back(std::make_unique<Model>());
         bool textureFlip = modelJson.HasMember("flipY") && modelJson["flipY"].GetBool();
         models.back()->cw_orient = modelJson.HasMember("cw_orient") && modelJson["cw_orient"].GetBool();
+        models.back()->model_index = modelJson.HasMember("model_index") ? modelJson["model_index"].GetUint() : 0;
         auto glbPath = modelJson["path"].GetString();
         if (!models.back()->LoadModel(glbPath, textureFlip)) {
             throw std::runtime_error(("Can't load model (" + std::string(glbPath) + ")"));
@@ -187,7 +196,6 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     } else {
         glFrontFace(GL_CCW);
     }
-
     //actual rendering
     mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
 
@@ -195,18 +203,21 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(vertex_pos_loc));
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(texCoord_loc));
+    MBGL_CHECK_ERROR(glEnableVertexAttribArray(normal_loc));
 
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, model->bufferHandle));
 
     MBGL_CHECK_ERROR(glVertexAttribPointer(vertex_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
     MBGL_CHECK_ERROR(glVertexAttribPointer(texCoord_loc, 2, GL_FLOAT, GL_FALSE, 0, (void*)(size_t)model->texCoordBufferOffset));
+    MBGL_CHECK_ERROR(glVertexAttribPointer(normal_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)(size_t)model->normalBufferOffset));
+    
 
     if (model->numIndices == 0) {
         MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, model->numVertices));
     } else {
         MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, model->bufferHandle));
         glDrawElements(
-            GL_TRIANGLE_STRIP,
+            GL_TRIANGLES,
             model->numIndices,
             GL_UNSIGNED_SHORT,
             (void*)(size_t)model->indexBufferOffset
@@ -214,6 +225,8 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     }
     MBGL_CHECK_ERROR(glDisableVertexAttribArray(vertex_pos_loc));
     MBGL_CHECK_ERROR(glDisableVertexAttribArray(texCoord_loc));
+    MBGL_CHECK_ERROR(glDisableVertexAttribArray(normal_loc));
+
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, 0));
 }
 

@@ -20,6 +20,7 @@ public:
     mbgl::mat4 model_matrix;
     
     bool cw_orient = false;
+    size_t model_index = 0;
 
     float boundsRadius = 0;
     vec3 boundsCenter;
@@ -28,11 +29,13 @@ public:
 
     GLuint indexBufferOffset = 0;
     GLuint texCoordBufferOffset = 0;
+    GLuint normalBufferOffset = 0;
 
     GLuint texture_handle = 0;
 
     int numVertices = 0;
     size_t numIndices = 0;
+    
 };
 
 } //namespace platform
