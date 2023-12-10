@@ -47,6 +47,7 @@ varying vec3 v_norm;
 void main() {
     vec4 color = texture2D(u_Texture, v_texCoord);
     gl_FragColor = color;
+    
     //gl_FragColor = vec4(v_norm, 1.0);
 }
 )MBGL_SHADER";
@@ -81,7 +82,7 @@ void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glDepthMask(GL_TRUE);
-    glDepthRangef(0.0, param.depthMin);
+    glDepthRangef(0.0, param.depthMin); //workaround. depthEpsilon is too small to render 3d models.
 
     MBGL_CHECK_ERROR(glUseProgram(program));
 
@@ -95,7 +96,7 @@ void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
 void MeshLayer::deinitialize() {
         if (program) {
             for (const auto& model : models) {
-                MBGL_CHECK_ERROR(glDeleteBuffers(1, &model->bufferHandle));
+                model->Clear();
             }
             MBGL_CHECK_ERROR(glDetachShader(program, vertexShader));
             MBGL_CHECK_ERROR(glDetachShader(program, fragmentShader));
@@ -187,6 +188,7 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     for (const auto& plane : planes) {
         if (!isSphereIntersect(plane)) {
             //culling happened
+            model->UnloadBufferData();
             return;
         }
     }
@@ -204,6 +206,9 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(vertex_pos_loc));
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(texCoord_loc));
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(normal_loc));
+
+    //TODO: count loaded models and unload them only when their number > max
+    model->LoadAndBindBufferData();
 
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, model->bufferHandle));
 

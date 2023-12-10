@@ -15,6 +15,11 @@ public:
     void SetCoordinates(double lat, double lng);
     void Rotate(vec3 euler);
 
+    void UnloadBufferData();
+    void LoadAndBindBufferData();
+    void Clear();
+
+    bool IsBufferLoaded() { return is_buffer_loaded; }
 public:
     Point<double> world_pos;
     mbgl::mat4 model_matrix;
@@ -35,7 +40,10 @@ public:
 
     int numVertices = 0;
     size_t numIndices = 0;
-    
+
+  private:
+    std::vector<unsigned char> saved_buffer_data;
+    bool is_buffer_loaded = false;  
 };
 
 } //namespace platform

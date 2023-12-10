@@ -89,6 +89,7 @@ void RenderCustomLayer::render(PaintParameters& paintParameters) {
     parameters.bearing = -state.getBearing() * util::RAD2DEG;
     parameters.pitch = state.getPitch();
     parameters.fieldOfView = state.getFieldOfView();
+    parameters.depthMin = paintParameters.depthRangeSize;
     mat4 projMatrix;
     state.getProjMatrix(projMatrix);
     parameters.projectionMatrix = projMatrix;

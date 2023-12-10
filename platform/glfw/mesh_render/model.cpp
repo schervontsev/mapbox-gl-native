@@ -19,6 +19,8 @@
 #include <../../../vendor/tinygltf/tiny_gltf.h>
 
 #include <iostream>
+#include "mbgl/util/event.hpp"
+#include "mbgl/util/logging.hpp"
 
 namespace mbgl {
 namespace platform {
@@ -161,6 +163,15 @@ bool Model::LoadModel(const std::string& filePath, bool flipY) {
         normalLen = bufferView.byteLength;
     }
 
+    saved_buffer_data.resize(verticesLen + indexLen + texCoordLen + normalLen);
+    memcpy(saved_buffer_data.data(), positionsData, verticesLen);
+    if (indexLen > 0) {
+        memcpy(saved_buffer_data.data() + verticesLen, indexData, indexLen);
+    }
+    memcpy(saved_buffer_data.data() + verticesLen + indexLen, texCoordData, texCoordLen);
+    memcpy(saved_buffer_data.data() + verticesLen + indexLen + texCoordLen, normalData, normalLen);
+
+
     MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
 
@@ -175,6 +186,31 @@ bool Model::LoadModel(const std::string& filePath, bool flipY) {
     MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, 0));
 
     return true;
+}
+
+void Model::UnloadBufferData() {
+    if (is_buffer_loaded) {
+        MBGL_CHECK_ERROR(glDeleteBuffers(1, &bufferHandle));
+        is_buffer_loaded = false;
+        mbgl::Log::Info(mbgl::Event::Render, "Unloaded 3d model in gpu");
+    }
+}
+
+void Model::Clear() {
+    UnloadBufferData();
+    saved_buffer_data.clear();
+}
+
+void Model::LoadAndBindBufferData() {
+    if (is_buffer_loaded) {
+        MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
+    } else if (!is_buffer_loaded && !saved_buffer_data.empty()) {
+        MBGL_CHECK_ERROR(glGenBuffers(1, &bufferHandle));
+        MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, bufferHandle));
+        MBGL_CHECK_ERROR(glBufferData(GL_ARRAY_BUFFER, saved_buffer_data.size(), saved_buffer_data.data(), GL_STATIC_DRAW));
+        is_buffer_loaded = true;
+        mbgl::Log::Info(mbgl::Event::Render, "Loaded 3d model in gpu");
+    }
 }
 
 void Model::SetCoordinates(double lat, double lng) {
