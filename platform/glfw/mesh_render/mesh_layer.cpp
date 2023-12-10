@@ -60,7 +60,24 @@ void main() {
 }
 )MBGL_SHADER";
 
+static const GLchar* shadowVertexShaderSource = R"MBGL_SHADER(
+attribute vec3 a_pos;
+uniform mat4 u_matrix;
+
+void main() {
+    gl_Position = u_matrix * vec4(a_pos, 1.0);
+}
+
+)MBGL_SHADER";
+
+static const GLchar* shadowFragmentShaderSource = R"MBGL_SHADER(
+void main() {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.2);
+}
+)MBGL_SHADER";
+
 void MeshLayer::initialize() {
+    //shaders
     program = MBGL_CHECK_ERROR(glCreateProgram());
     vertexShader = MBGL_CHECK_ERROR(glCreateShader(GL_VERTEX_SHADER));
     fragmentShader = MBGL_CHECK_ERROR(glCreateShader(GL_FRAGMENT_SHADER));
@@ -73,6 +90,7 @@ void MeshLayer::initialize() {
     MBGL_CHECK_ERROR(glAttachShader(program, fragmentShader));
     MBGL_CHECK_ERROR(glLinkProgram(program));
 
+    //uniforms
     vertex_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_pos"));
     proj_mat_loc = glGetUniformLocation(program, "u_matrix");
     light_pos_loc = glGetUniformLocation(program, "u_lightDirection");
@@ -82,7 +100,54 @@ void MeshLayer::initialize() {
 
     normal_loc = MBGL_CHECK_ERROR(glGetAttribLocation(program, "a_norm"));
 
+    //shadows
+    shadowProgram = MBGL_CHECK_ERROR(glCreateProgram());
+    shadowVertexShader = MBGL_CHECK_ERROR(glCreateShader(GL_VERTEX_SHADER));
+    shadowFragmentShader = MBGL_CHECK_ERROR(glCreateShader(GL_FRAGMENT_SHADER));
+
+    MBGL_CHECK_ERROR(glShaderSource(shadowVertexShader, 1, &shadowVertexShaderSource, nullptr));
+    MBGL_CHECK_ERROR(glCompileShader(shadowVertexShader));
+    MBGL_CHECK_ERROR(glAttachShader(shadowProgram, shadowVertexShader));
+    MBGL_CHECK_ERROR(glShaderSource(shadowFragmentShader, 1, &shadowFragmentShaderSource, nullptr));
+    MBGL_CHECK_ERROR(glCompileShader(shadowFragmentShader));
+    MBGL_CHECK_ERROR(glAttachShader(shadowProgram, shadowFragmentShader));
+    MBGL_CHECK_ERROR(glLinkProgram(shadowProgram));
+
+    //shadow uniforms
+    shadow_vertex_pos_loc = MBGL_CHECK_ERROR(glGetAttribLocation(shadowProgram, "a_pos"));
+
+    //loading from files
     LoadModels("platform/glfw/assets/models.json");
+}
+
+void MeshLayer::make_shadow_matrix(mat4& mat, vec3 l) {
+    double d, c;
+    vec3 n = {0.0, 0.0, -1.0};
+    vec3 e = {0.0, 0.0, -1.0};
+
+    d = n[0]*l[0] + n[1]*l[1] + n[2]*l[2];
+    c = e[0]*n[0] + e[1]*n[1] + e[2]*n[2] - d;
+
+    mat[0]  = l[0]*n[0]+c; 
+    mat[4]  = n[1]*l[0]; 
+    mat[8]  = n[2]*l[0]; 
+    mat[12] = -l[0]*c-l[0]*d;
+
+    mat[1]  = n[0]*l[1];        
+    mat[5]  = l[1]*n[1]+c;
+    mat[9]  = n[2]*l[1]; 
+    mat[13] = -l[1]*c-l[1]*d;
+
+    mat[2]  = n[0]*l[2];        
+    mat[6]  = n[1]*l[2]; 
+    mat[10] = l[2]*n[2]+c; 
+    mat[14] = -l[2]*c-l[2]*d;
+
+    mat[3]  = n[0];        
+    mat[7]  = n[1]; 
+    mat[11] = n[2]; 
+    mat[15] = -d;
+
 }
 
 void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
@@ -92,8 +157,6 @@ void MeshLayer::render(const mbgl::style::CustomLayerRenderParameters& param) {
     glCullFace(GL_BACK);
     glDepthMask(GL_TRUE);
     glDepthRangef(0.0, param.depthMin); //workaround. depthEpsilon is too small to render 3d models.
-
-    MBGL_CHECK_ERROR(glUseProgram(program));
 
     //every model in its own draw call. 
     //It's possible to do everything with one buffer, but we don't have a lot of models, especially with bounds test
@@ -197,6 +260,7 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     for (const auto& plane : planes) {
         if (!isSphereIntersect(plane)) {
             //culling happened
+            //TODO: count loaded models and unload them only when their number > max
             model->UnloadBufferData();
             return;
         }
@@ -207,10 +271,46 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     } else {
         glFrontFace(GL_CCW);
     }
-    //actual rendering
-    mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
 
+    //hardcoded light for diffuse light and shadow
     GLfloat light_dir[3] = {0.5f, 0.5f, -1.f};
+    vec3 light_pos =  {0.f, 0.f, 200.0f};
+    //loading from cache and binding
+    model->LoadAndBindBufferData();
+
+    //planar shadow (not finished!)
+    //doesn't work
+    mat4 light_projection_mat;
+    matrix::identity(light_projection_mat);
+    make_shadow_matrix(light_projection_mat, light_pos);
+    mat4 shadow_mat {param.projectionMatrix};
+    matrix::multiply(shadow_mat, shadow_mat, world_matrix);
+    matrix::multiply(shadow_mat, shadow_mat, light_projection_mat);
+    matrix::multiply(shadow_mat, shadow_mat, model->model_matrix);
+    
+
+    MBGL_CHECK_ERROR(glUseProgram(shadowProgram));
+    mbgl::gl::bindUniform(shadow_mat_loc, shadow_mat);
+
+    MBGL_CHECK_ERROR(glEnableVertexAttribArray(shadow_vertex_pos_loc));
+    MBGL_CHECK_ERROR(glVertexAttribPointer(shadow_vertex_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));    
+
+    if (model->numIndices == 0) {
+        MBGL_CHECK_ERROR(glDrawArrays(GL_TRIANGLES, 0, model->numVertices));
+    } else {
+        MBGL_CHECK_ERROR(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, model->bufferHandle));
+        glDrawElements(
+            GL_TRIANGLES,
+            model->numIndices,
+            GL_UNSIGNED_SHORT,
+            (void*)(size_t)model->indexBufferOffset
+        );
+    }
+    MBGL_CHECK_ERROR(glDisableVertexAttribArray(shadow_vertex_pos_loc));
+
+    //actual rendering
+    MBGL_CHECK_ERROR(glUseProgram(program));
+    mbgl::gl::bindUniform(proj_mat_loc, resultMatrix);
     glUniform3fv(light_pos_loc, 1, light_dir);
 
     MBGL_CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, model->texture_handle));
@@ -218,11 +318,6 @@ void MeshLayer::RenderModel(Model* model, const mbgl::style::CustomLayerRenderPa
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(vertex_pos_loc));
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(texCoord_loc));
     MBGL_CHECK_ERROR(glEnableVertexAttribArray(normal_loc));
-
-    //TODO: count loaded models and unload them only when their number > max
-    model->LoadAndBindBufferData();
-
-    MBGL_CHECK_ERROR(glBindBuffer(GL_ARRAY_BUFFER, model->bufferHandle));
 
     MBGL_CHECK_ERROR(glVertexAttribPointer(vertex_pos_loc, 3, GL_FLOAT, GL_FALSE, 0, (void*)0));
     MBGL_CHECK_ERROR(glVertexAttribPointer(texCoord_loc, 2, GL_FLOAT, GL_FALSE, 0, (void*)(size_t)model->texCoordBufferOffset));
